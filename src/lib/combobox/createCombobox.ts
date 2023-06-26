@@ -1,3 +1,4 @@
+import { autoPlacement, computePosition, flip, offset } from "@floating-ui/dom";
 import { tick } from "svelte";
 import { writable, type Writable } from "svelte/store";
 import { uid } from "uid";
@@ -6,13 +7,19 @@ export type Value = { value: string; key?: string };
 
 interface Options<T> {
   onSelection?: (value: T) => void;
-  hideWhenEmpty?: boolean;
+  showWhenEmpty?: boolean;
+  showOnFocus?: boolean;
   autocomplete?: "none" | "manual" | "auto" | "inline";
 }
 
 export function createCombobox<T extends Value>(
   values: T[] | Writable<T[]>,
-  { onSelection, hideWhenEmpty, autocomplete = "manual" }: Options<T> = {}
+  {
+    onSelection,
+    showWhenEmpty = false,
+    showOnFocus = false,
+    autocomplete = "manual",
+  }: Options<T> = {}
 ) {
   type _T = T & { __node?: HTMLElement };
 
@@ -20,6 +27,9 @@ export function createCombobox<T extends Value>(
   const filteredValues = writable<_T[]>([]);
   const focusedValue = writable<_T | null>(null);
   const inputValue = writable<string>("");
+  const listboxX = writable(0);
+  const listboxY = writable(0);
+
   let localValues: _T[] = [];
   let localListboxVisible = false;
   let localFilteredValues: _T[] = [];
@@ -44,18 +54,17 @@ export function createCombobox<T extends Value>(
   listboxVisible.subscribe((value) => {
     localListboxVisible = value;
     if (!value) focusedValue.set(null);
-    // filteredValues.set(localValues); // TODO do we need this?
     if (inputNode) inputNode.ariaExpanded = value.toString();
     if (buttonNode) buttonNode.ariaExpanded = value.toString();
   });
 
   filteredValues.subscribe((values) => {
     localFilteredValues = values;
-    if (values.length === 0 && hideWhenEmpty) {
-      listboxVisible.set(false);
-    }
     if (localFocusedValue && !values.includes(localFocusedValue)) {
       focusedValue.set(null);
+    }
+    if (inputNode && listboxNode) {
+      updatePopoverPos();
     }
   });
 
@@ -96,6 +105,22 @@ export function createCombobox<T extends Value>(
     );
   }
 
+  function updatePopoverPos() {
+    computePosition(inputNode, listboxNode, {
+      placement: "bottom-start",
+      middleware: [
+        offset(8),
+        // flip(),
+        // autoPlacement(),
+        // shift({ padding: 5 }),
+      ],
+    }).then(({ x, y }) => {
+      console.log(x, y);
+      listboxX.set(x);
+      listboxY.set(y);
+    });
+  }
+
   function setInputValue(value: string) {
     inputValue.set(value);
     inputNode.value = value;
@@ -104,21 +129,21 @@ export function createCombobox<T extends Value>(
   // EVENT HANDLERS //
   function onInputInput(e: Event) {
     focusedValue.set(null);
-    listboxVisible.set(true);
     setInputValue((e.target as HTMLInputElement).value);
     filterValues();
+    listboxVisible.set(localFilteredValues.length > 0 || showWhenEmpty);
   }
 
   function acceptItem(value: T) {
     setInputValue(value.value);
-    filterValues(); // TODO do we need this?
     listboxVisible.set(false);
+    filteredValues.set(localValues);
     onSelection && onSelection(value);
   }
 
   function onInputFocus() {
-    filterValues();
-    listboxVisible.set(true);
+    filterValues(); // TODO Do we need this? We need to call this at the start and whenever input changes, not on focus, right?
+    if (showOnFocus) listboxVisible.set(true);
   }
 
   function onInputBlur(e: FocusEvent) {
@@ -143,8 +168,9 @@ export function createCombobox<T extends Value>(
             localFilteredValues[Math.min(index + 1, localFilteredValues.length - 1)] ?? null
           );
         } else {
-          focusedValue.set(localFilteredValues[0] ?? null);
           listboxVisible.set(true);
+          console.log(localFilteredValues);
+          focusedValue.set(localFilteredValues[0] ?? null);
         }
         break;
       case "ArrowUp":
@@ -251,6 +277,7 @@ export function createCombobox<T extends Value>(
     node.ariaLabel = "Suggestions";
     // TODO labelledBy input and/or input's label (react-aria does both in addition to aria-label)
     // but they also have the button labelledBy itself so...
+    updatePopoverPos();
   }
 
   function item(node: HTMLElement, value: T) {
@@ -277,6 +304,8 @@ export function createCombobox<T extends Value>(
     focusedValue: focusedValue as Writable<T | null>,
     filteredValues: filteredValues as Writable<T[]>,
     inputValue,
+    listboxX,
+    listboxY,
     label,
     input,
     button,
