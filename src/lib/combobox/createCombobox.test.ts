@@ -1,71 +1,74 @@
-import { describe, expect, it, vi } from "vitest";
-import { createCombobox } from "./createCombobox.js";
-import { get, writable } from "svelte/store";
+import "@testing-library/jest-dom";
+import { describe, expect, test, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
-import { tick } from "svelte";
 
-describe("combobox", () => {
-  const values = writable([
+import { get, writable } from "svelte/store";
+
+import { createCombobox } from "./createCombobox.js";
+
+function createDefaultValues() {
+  return writable([
     { value: "foo", key: "foo" },
     { value: "bar", key: "bar" },
     { value: "baz", key: "baz" },
   ]);
-  const onSelection = vi.fn();
-  const {
-    listboxVisible,
-    focusedValue,
-    filteredValues,
-    inputValue,
-    listboxX,
-    listboxY,
-    input,
-    listbox,
-    item,
-  } = createCombobox(values, {
-    onSelection,
-  });
+}
 
+function createTestCombobox(
+  values: Parameters<typeof createCombobox>[0] = createDefaultValues(),
+  options?: Parameters<typeof createCombobox>[1]
+) {
+  const combobox = createCombobox(values, options);
+
+  const wrapperNode = document.createElement("div");
+  document.body.appendChild(wrapperNode);
+  const labelNode = document.createElement("label");
+  wrapperNode.appendChild(labelNode);
   const inputNode = document.createElement("input");
+  wrapperNode.appendChild(inputNode);
+  const buttonNode = document.createElement("button");
+  wrapperNode.appendChild(buttonNode);
   const listboxNode = document.createElement("ul");
-  input(inputNode);
-  listbox(listboxNode);
-  for (const value of get(filteredValues)) {
+  wrapperNode.appendChild(listboxNode);
+  combobox.label(labelNode);
+  combobox.input(inputNode);
+  combobox.button(buttonNode);
+  combobox.listbox(listboxNode);
+  for (const value of get(combobox.filteredValues)) {
     const itemNode = document.createElement("li");
-    item(itemNode, value);
+    listboxNode.appendChild(itemNode);
+    combobox.item(itemNode, value);
   }
 
-  it("should have correct default state", () => {
+  return { ...combobox, labelNode, inputNode, buttonNode, listboxNode };
+}
+
+describe("combobox", () => {
+  const user = userEvent.setup();
+  const onSelection = vi.fn();
+
+  test("default options", async () => {
+    const { listboxVisible, inputNode } = createTestCombobox();
     expect(get(listboxVisible)).toBe(false);
     expect(inputNode.ariaExpanded).toBe("false");
     expect(inputNode.getAttribute("aria-activedescendant") == null).toBe(true);
-  });
 
-  it("should open when input is focused", async () => {
-    inputNode.focus();
+    await user.click(inputNode);
     expect(get(listboxVisible)).toBe(false);
+
+    await user.k;
   });
 
-  it("showOnFocus", async () => {
-    const user = userEvent.setup();
-
-    const { listboxVisible, filteredValues, input, listbox, item } = createCombobox(values, {
+  test("showOnFocus", async () => {
+    const { listboxVisible, filteredValues, inputNode } = createTestCombobox(undefined, {
       showOnFocus: true,
     });
 
-    const inputNode = document.createElement("input");
-    const listboxNode = document.createElement("ul");
-    input(inputNode);
-    listbox(listboxNode);
-    for (const value of get(filteredValues)) {
-      const itemNode = document.createElement("li");
-      item(itemNode, value);
-    }
-
+    expect(get(listboxVisible)).toBe(false);
     await user.click(inputNode);
     expect(get(listboxVisible)).toBe(true);
 
-    inputNode.value = "foo";
-    inputNode.dispatchEvent(new Event("input"));
+    await user.type(inputNode, "foo");
     expect(get(filteredValues).length).toBe(1);
   });
 });

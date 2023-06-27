@@ -1,4 +1,4 @@
-import { autoPlacement, computePosition, flip, offset } from "@floating-ui/dom";
+import { computePosition, offset } from "@floating-ui/dom";
 import { tick } from "svelte";
 import { writable, type Writable } from "svelte/store";
 import { uid } from "uid";
@@ -89,6 +89,7 @@ export function createCombobox<T extends Value>(
 
   inputValue.subscribe((value) => {
     localInputValue = value;
+    if (inputNode) inputNode.value = value;
   });
   ///////////////////
 
@@ -115,40 +116,33 @@ export function createCombobox<T extends Value>(
         // shift({ padding: 5 }),
       ],
     }).then(({ x, y }) => {
-      console.log(x, y);
       listboxX.set(x);
       listboxY.set(y);
     });
   }
 
-  function setInputValue(value: string) {
-    inputValue.set(value);
-    inputNode.value = value;
-  }
-
   // EVENT HANDLERS //
   function onInputInput(e: Event) {
     focusedValue.set(null);
-    setInputValue((e.target as HTMLInputElement).value);
+    inputValue.set((e.target as HTMLInputElement).value);
     filterValues();
     listboxVisible.set(localFilteredValues.length > 0 || showWhenEmpty);
   }
 
   function acceptItem(value: T) {
-    setInputValue(value.value);
+    inputValue.set(value.value);
     listboxVisible.set(false);
     filteredValues.set(localValues);
     onSelection && onSelection(value);
   }
 
   function onInputFocus() {
-    filterValues(); // TODO Do we need this? We need to call this at the start and whenever input changes, not on focus, right?
+    // filterValues(); // TODO Do we need this? We need to call this at the start and whenever input changes, not on focus, right?
     if (showOnFocus) listboxVisible.set(true);
   }
 
   function onInputBlur(e: FocusEvent) {
-    if (listboxNode.contains(e.relatedTarget as Node)) {
-      inputNode.focus();
+    if (listboxNode.contains(e.relatedTarget as Node) || e.relatedTarget === buttonNode) {
       return;
     }
     listboxVisible.set(false);
@@ -199,14 +193,26 @@ export function createCombobox<T extends Value>(
     }
   }
 
-  function onItemMouseEnter(e: MouseEvent) {
+  function onButtonPointerdown(e: PointerEvent) {
+    // prevent deafult to prevent blur on input
+    e.preventDefault();
+    const wasVisible = localListboxVisible;
+    if (inputNode) inputNode.focus();
+    listboxVisible.set(!wasVisible);
+  }
+
+  function onItemMouseenter(e: MouseEvent) {
     const node = e.target as HTMLElement;
     const value = localValues.find((v) => v.__node === node);
     focusedValue.set(value ?? null);
   }
 
-  function onItemMouseLeave() {
+  function onItemMouseleave() {
     focusedValue.set(null);
+  }
+
+  function onItemPointerdown(e: PointerEvent) {
+    e.preventDefault();
   }
   ////////////////////
 
@@ -251,21 +257,19 @@ export function createCombobox<T extends Value>(
     };
   }
 
-  function button(node: HTMLElement) {
-    function buttonOnClick() {
-      listboxVisible.set(!localListboxVisible);
-    }
+  function button(node: HTMLButtonElement) {
+    buttonNode = node;
 
     node.tabIndex = -1;
-    node.ariaLabel = "Show suggestions";
+    node.ariaLabel = node.ariaLabel || "Show suggestions";
     node.setAttribute("aria-labelledby", labelId);
     node.ariaExpanded = "false";
     node.setAttribute("aria-controls", listboxId);
-    node.addEventListener("click", buttonOnClick);
+    node.addEventListener("pointerdown", onButtonPointerdown);
 
     return {
       destroy() {
-        node.removeEventListener("click", buttonOnClick);
+        node.removeEventListener("pointerdown", onButtonPointerdown);
       },
     };
   }
@@ -275,6 +279,7 @@ export function createCombobox<T extends Value>(
     node.id = listboxId;
     node.role = "listbox";
     node.ariaLabel = "Suggestions";
+
     // TODO labelledBy input and/or input's label (react-aria does both in addition to aria-label)
     // but they also have the button labelledBy itself so...
     updatePopoverPos();
@@ -286,15 +291,17 @@ export function createCombobox<T extends Value>(
     node.tabIndex = -1;
     const acceptThisItem = acceptItem.bind(null, value);
     node.addEventListener("click", acceptThisItem);
-    node.addEventListener("mouseenter", onItemMouseEnter);
-    node.addEventListener("mouseleave", onItemMouseLeave);
+    node.addEventListener("mouseenter", onItemMouseenter);
+    node.addEventListener("mouseleave", onItemMouseleave);
+    node.addEventListener("pointerdown", onItemPointerdown);
     (value as _T).__node = node;
 
     return {
       destroy() {
         node.removeEventListener("click", acceptThisItem);
-        node.removeEventListener("mouseenter", onItemMouseEnter);
-        node.removeEventListener("mouseleave", onItemMouseLeave);
+        node.removeEventListener("mouseenter", onItemMouseenter);
+        node.removeEventListener("mouseleave", onItemMouseleave);
+        node.removeEventListener("pointerdown", onItemPointerdown);
       },
     };
   }
