@@ -1,6 +1,7 @@
+import { getDocument } from "$lib/util.js";
 import { computePosition, offset } from "@floating-ui/dom";
 import { tick } from "svelte";
-import { writable, type Writable } from "svelte/store";
+import { get, writable, type Writable } from "svelte/store";
 import { uid } from "uid";
 
 export type Value = { value: string; key?: string };
@@ -96,13 +97,17 @@ export function createCombobox<T extends Value>(
   function assignLocalValues(values: T[]) {
     localValues = values;
     filterValues();
+    if (!localListboxVisible && showOnFocus && inputNode === getDocument()?.activeElement) {
+      showListbox();
+    }
   }
 
   function filterValues() {
     filteredValues.set(
-      localValues.filter((value) => {
+      // Assignment here is necessary due to a subscription not running before current subscription is finished
+      (localFilteredValues = localValues.filter((value) => {
         return value.value.toLowerCase().includes(localInputValue.toLowerCase());
-      })
+      }))
     );
   }
 
@@ -121,12 +126,16 @@ export function createCombobox<T extends Value>(
     });
   }
 
+  function showListbox() {
+    listboxVisible.set(localFilteredValues.length > 0 || showWhenEmpty);
+  }
+
   // EVENT HANDLERS //
   function onInputInput(e: Event) {
     focusedValue.set(null);
     inputValue.set((e.target as HTMLInputElement).value);
     filterValues();
-    listboxVisible.set(localFilteredValues.length > 0 || showWhenEmpty);
+    showListbox();
   }
 
   function acceptItem(value: T) {
@@ -138,11 +147,11 @@ export function createCombobox<T extends Value>(
 
   function onInputFocus() {
     // filterValues(); // TODO Do we need this? We need to call this at the start and whenever input changes, not on focus, right?
-    if (showOnFocus) listboxVisible.set(true);
+    if (showOnFocus) showListbox();
   }
 
   function onInputBlur(e: FocusEvent) {
-    if (listboxNode.contains(e.relatedTarget as Node) || e.relatedTarget === buttonNode) {
+    if (listboxNode?.contains(e.relatedTarget as Node) || e.relatedTarget === buttonNode) {
       return;
     }
     listboxVisible.set(false);
@@ -162,8 +171,7 @@ export function createCombobox<T extends Value>(
             localFilteredValues[Math.min(index + 1, localFilteredValues.length - 1)] ?? null
           );
         } else {
-          listboxVisible.set(true);
-          console.log(localFilteredValues);
+          showListbox();
           focusedValue.set(localFilteredValues[0] ?? null);
         }
         break;
@@ -173,8 +181,8 @@ export function createCombobox<T extends Value>(
           const index = localFilteredValues.indexOf(localFocusedValue);
           focusedValue.set(localFilteredValues[Math.max(index - 1, 0)] ?? null);
         } else {
+          showListbox();
           focusedValue.set(localFilteredValues[localFilteredValues.length - 1] ?? null);
-          listboxVisible.set(true);
         }
         break;
       case "ArrowRight":
@@ -289,7 +297,7 @@ export function createCombobox<T extends Value>(
     node.id = `item-${id}-${(value.key ?? value.value).replaceAll(/\s/g, "-")}}`;
     node.role = "option";
     node.tabIndex = -1;
-    const acceptThisItem = acceptItem.bind(null, value);
+    let acceptThisItem = acceptItem.bind(null, value);
     node.addEventListener("click", acceptThisItem);
     node.addEventListener("mouseenter", onItemMouseenter);
     node.addEventListener("mouseleave", onItemMouseleave);
@@ -297,6 +305,11 @@ export function createCombobox<T extends Value>(
     (value as _T).__node = node;
 
     return {
+      update(value: T) {
+        node.removeEventListener("click", acceptThisItem);
+        acceptThisItem = acceptItem.bind(null, value);
+        node.addEventListener("click", acceptThisItem);
+      },
       destroy() {
         node.removeEventListener("click", acceptThisItem);
         node.removeEventListener("mouseenter", onItemMouseenter);
